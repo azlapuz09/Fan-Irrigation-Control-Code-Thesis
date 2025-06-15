@@ -1,0 +1,143 @@
+#include <WiFi.h>
+#include <WebServer.h>
+
+// ======= WiFi Credentials =======
+const char *ssid = "ESP_SOIL";
+const char *password = "123456789";
+const char* http_username = "admin";
+const char* http_password = "admin123";
+
+// ======= Pins =======
+const int RELAY1_PIN = 5;
+const int RELAY2_PIN = 4;
+const int SOIL_PIN = 34; // Analog
+
+// ======= Globals =======
+int moistureThreshold = 2000; // Default threshold
+bool manualMode = false;      // false = Auto, true = Manual
+WebServer server(80);
+
+// ======= Helper Functions =======
+void allRelaysOff() {
+  digitalWrite(RELAY1_PIN, HIGH);
+  digitalWrite(RELAY2_PIN, HIGH);
+}
+
+void setupRelays() {
+  pinMode(RELAY1_PIN, OUTPUT);
+  pinMode(RELAY2_PIN, OUTPUT);
+  allRelaysOff();
+}
+
+// ======= Web Handlers =======
+void handleRoot() {
+  if (!server.authenticate(http_username, http_password)) return server.requestAuthentication();
+
+  String modeStr = manualMode ? "Manual" : "Auto";
+  String otherModeStr = manualMode ? "auto" : "manual";
+
+  String html = "<!DOCTYPE html><html><head><title>ESP32 Control</title><meta name='viewport' content='width=device-width, initial-scale=1'>";
+  html += "<style>body{font-family:sans-serif;text-align:center;background:#eef;}button{padding:15px 30px;margin:10px;font-size:20px;}input{font-size:18px;}</style></head><body>";
+  html += "<h2>Irrigation Control</h2>";
+  html += "<p><b>Mode:</b> " + modeStr + "</p>";
+  html += "<form action='/setMode'><input type='hidden' name='mode' value='" + otherModeStr + "'><input type='submit' value='Switch to " + otherModeStr + "'></form><br>";
+  html += "<button onclick=\"location.href='/toggle?relay=1'\">Toggle Relay 1</button><br>";
+  html += "<button onclick=\"location.href='/toggle?relay=2'\">Toggle Relay 2</button><br><br>";
+  html += "<a href='/config'>Go to Config</a>";
+  html += "</body></html>";
+  server.send(200, "text/html", html);
+}
+
+void handleToggle() {
+  if (!server.authenticate(http_username, http_password)) return server.requestAuthentication();
+
+  if (!server.hasArg("relay")) {
+    server.send(400, "text/plain", "Missing relay arg");
+    return;
+  }
+
+  manualMode = true; // User manually intervened — switch to manual mode
+
+  int relay = server.arg("relay").toInt();
+  switch (relay) {
+    case 1: digitalWrite(RELAY1_PIN, !digitalRead(RELAY1_PIN)); break;
+    case 2: digitalWrite(RELAY2_PIN, !digitalRead(RELAY2_PIN)); break;
+  }
+  server.sendHeader("Location", "/");
+  server.send(303);
+}
+
+void handleConfig() {
+  if (!server.authenticate(http_username, http_password)) return server.requestAuthentication();
+
+  String html = "<!DOCTYPE html><html><head><title>Config</title></head><body>";
+  html += "<h2>Set Moisture Threshold</h2>";
+  html += "<form action='/setThreshold'>";
+  html += "<input type='number' name='value' value='" + String(moistureThreshold) + "'>";
+  html += "<input type='submit' value='Update'>";
+  html += "</form><p>Current Threshold: " + String(moistureThreshold) + "</p>";
+  html += "<a href='/'>Back</a>";
+  html += "</body></html>";
+  server.send(200, "text/html", html);
+}
+
+void handleSetThreshold() {
+  if (!server.authenticate(http_username, http_password)) return server.requestAuthentication();
+  if (server.hasArg("value")) moistureThreshold = server.arg("value").toInt();
+  server.sendHeader("Location", "/config");
+  server.send(303);
+}
+
+void handleSetMode() {
+  if (!server.authenticate(http_username, http_password)) return server.requestAuthentication();
+
+  if (server.hasArg("mode")) {
+    String mode = server.arg("mode");
+    manualMode = (mode == "manual");
+    Serial.println("Mode changed to: " + mode);
+  }
+  server.sendHeader("Location", "/");
+  server.send(303);
+}
+
+// ======= Setup & Loop =======
+void setup() {
+  Serial.begin(115200);
+  WiFi.softAP(ssid, password);
+  Serial.println("WiFi AP started. Connect to: ESP_SOIL");
+
+  setupRelays();
+
+  server.on("/", handleRoot);
+  server.on("/toggle", handleToggle);
+  server.on("/config", handleConfig);
+  server.on("/setThreshold", handleSetThreshold);
+  server.on("/setMode", handleSetMode);
+
+  server.begin();
+  Serial.println("Web server started.");
+}
+
+void loop() {
+  server.handleClient();
+
+  if (!manualMode) {
+    int moisture = analogRead(SOIL_PIN);
+    Serial.print("Soil Moisture: ");
+    Serial.println(moisture);
+
+    if (moisture < moistureThreshold) {
+      digitalWrite(RELAY1_PIN, LOW);
+      digitalWrite(RELAY2_PIN, LOW);
+      Serial.println("Dry → Pumps ON");
+    } else {
+      digitalWrite(RELAY1_PIN, HIGH);
+      digitalWrite(RELAY2_PIN, HIGH);
+      Serial.println("Moist → Pumps OFF");
+    }
+  } else {
+    Serial.println("Manual Mode Active — Automation Paused");
+  }
+
+  delay(2000);
+}
