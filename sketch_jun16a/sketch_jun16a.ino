@@ -129,10 +129,10 @@ void loop() {
     Serial.println(" °C");
 
     if (temp > tempThreshold) {
-      digitalWrite(RELAY1_PIN, LOW); // Fan ON
+      digitalWrite(RELAY1_PIN, HIGH); // Fan ON
       Serial.println("🔥 Too hot → Fan ON");
     } else {
-      digitalWrite(RELAY1_PIN, HIGH); // Fan OFF
+      digitalWrite(RELAY1_PIN, LOW); // Fan OFF
       Serial.println("😌 Cool enough → Fan OFF");
     }
   } else {
