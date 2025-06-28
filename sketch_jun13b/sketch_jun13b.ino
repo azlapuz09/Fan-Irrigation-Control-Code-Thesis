@@ -127,12 +127,12 @@ void loop() {
     Serial.println(moisture);
 
     if (moisture < moistureThreshold) {
-      digitalWrite(RELAY1_PIN, LOW);
-      digitalWrite(RELAY2_PIN, LOW);
-      Serial.println("Dry → Pumps ON");
-    } else {
       digitalWrite(RELAY1_PIN, HIGH);
       digitalWrite(RELAY2_PIN, HIGH);
+      Serial.println("Dry → Pumps ON");
+    } else {
+      digitalWrite(RELAY1_PIN, LOW);
+      digitalWrite(RELAY2_PIN, LOW);
       Serial.println("Moist → Pumps OFF");
     }
   } else {
