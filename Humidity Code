@@ -10,6 +10,7 @@ const char* http_password = "admin123";
 
 // ======= Pins =======
 const int RELAY1_PIN = 5;         // Fan relay
+const int RELAY2_PIN = 4;
 const int DHT_PIN = 14;           // DHT22 data pin
 
 #define DHTTYPE DHT22
@@ -23,7 +24,10 @@ WebServer server(80);
 // ======= Helper Functions =======
 void setupRelays() {
   pinMode(RELAY1_PIN, OUTPUT);
-  digitalWrite(RELAY1_PIN, HIGH); // OFF by default (assuming LOW = ON)
+  digitalWrite(RELAY1_PIN, LOW); // OFF by default (assuming LOW = ON)
+
+  pinMode(RELAY2_PIN, OUTPUT);
+  digitalWrite(RELAY2_PIN, LOW);
 }
 
 void handleRoot() {
@@ -34,11 +38,19 @@ void handleRoot() {
 
   String html = "<!DOCTYPE html><html><head><title>Humidity Control</title><meta name='viewport' content='width=device-width, initial-scale=1'>";
   html += "<style>body{font-family:sans-serif;text-align:center;background:#eef;}button,input{padding:15px 30px;margin:10px;font-size:20px;}</style></head><body>";
-  html += "<h2>ESP32 Fan Control</h2>";
+  html += "<h2>ESP32 Humidity Control</h2>";
   html += "<p><b>Mode:</b> " + modeStr + "</p>";
   html += "<form action='/setMode'><input type='hidden' name='mode' value='" + otherModeStr + "'><input type='submit' value='Switch to " + otherModeStr + "'></form><br>";
   html += "<button onclick=\"location.href='/toggle?relay=1'\">Toggle Fan</button><br><br>";
   html += "<a href='/config'>Go to Config</a>";
+  html += "<p>Humidity: <span id='humidity'>--</span>%</p>";
+  html += "<script>";
+  html += "setInterval(() => {";
+  html += "fetch('/status').then(r => r.json()).then(d => {";
+  html += "document.getElementById('humidity').innerText = d.humidity;";
+  html += "});";
+  html += "}, 3000);"; // Update every 3 seconds
+  html += "</script>";
   html += "</body></html>";
   server.send(200, "text/html", html);
 }
@@ -59,6 +71,17 @@ void handleToggle() {
   server.sendHeader("Location", "/");
   server.send(303);
 }
+
+void handleStatus() {
+  float h = dht.readHumidity();
+  if (isnan(h)) {
+    server.send(500, "application/json", "{\"error\":\"DHT read failed\"}");
+    return;
+  }
+  String json = "{ \"humidity\": " + String(h, 1) + " }";
+  server.send(200, "application/json", json);
+}
+
 
 void handleConfig() {
   if (!server.authenticate(http_username, http_password)) return server.requestAuthentication();
@@ -114,15 +137,23 @@ void setup() {
   server.on("/config", handleConfig);
   server.on("/setThreshold", handleSetThreshold);
   server.on("/setMode", handleSetMode);
+  server.on("/status", handleStatus);
+
 
   server.begin();
   Serial.println("Web server started.");
 }
 
+unsigned long previousMillis = 0;
+const unsigned long interval = 3000;
+
 void loop() {
   server.handleClient();
 
-  if (!manualMode) {
+  unsigned long currentMillis = millis();
+  if (!manualMode && currentMillis - previousMillis >= interval) {
+    previousMillis = currentMillis;
+
     float humidity = dht.readHumidity();
     if (isnan(humidity)) {
       Serial.println("Failed to read from DHT sensor!");
@@ -134,15 +165,17 @@ void loop() {
     Serial.println(" %");
 
     if (humidity > humidityThreshold) {
-      digitalWrite(RELAY1_PIN, HIGH); // Fan ON (if HIGH is ON)
-      Serial.println("Too Humid = Fan ON");
+      digitalWrite(RELAY1_PIN, HIGH);  // Dehumidifier ON
+      digitalWrite(RELAY2_PIN, LOW);   // Humidifier OFF
+      Serial.println("Too Humid = Dehumidifier ON");
+    } else if (humidity < humidityThreshold) {
+      digitalWrite(RELAY1_PIN, LOW);   // Dehumidifier OFF
+      digitalWrite(RELAY2_PIN, HIGH);  // Humidifier ON
+      Serial.println("Too Dry = Humidifier ON");
     } else {
-      digitalWrite(RELAY1_PIN, LOW); // Fan OFF
-      Serial.println("Humidity Normal = Fan OFF");
+      digitalWrite(RELAY1_PIN, LOW);
+      digitalWrite(RELAY2_PIN, LOW);
+      Serial.println("Humidity is just right. All systems are inactive.");
     }
-  } else {
-    Serial.println("Manual Mode Active — Automation Paused");
   }
-
-  delay(3000);
 }
