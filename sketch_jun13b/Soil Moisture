@@ -48,7 +48,7 @@ void handleRoot() {
   html += "<script>";
   html += "setInterval(() => {";
   html += "fetch('/status').then(r => r.json()).then(d => {";
-  html += "document.getElementById('humidity').innerText = d.humidity;";
+  html += "document.getElementById('moisture').innerText = d.moisture;";
   html += "});";
   html += "}, 3000);"; // Update every 3 seconds
   html += "</script>";
@@ -144,9 +144,9 @@ void loop() {
   if (!manualMode && currentMillis - previousMillis >= interval) {
     previousMillis = currentMillis;
 
-    float humidity = dht.readHumidity();
-    if (isnan(humidity)) {
-      Serial.println("Failed to read from DHT sensor!");
+    float moisture = dht.readHumidity();
+    if (isnan(moisture)) {
+      Serial.println("Failed to read from Soil Moisture sensor!");
       return;
     }
 
