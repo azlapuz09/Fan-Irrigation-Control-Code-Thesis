@@ -39,6 +39,14 @@ void handleRoot() {
   html += "<form action='/setMode'><input type='hidden' name='mode' value='" + otherModeStr + "'><input type='submit' value='Switch to " + otherModeStr + "'></form><br>";
   html += "<button onclick=\"location.href='/toggle?relay=1'\">Toggle Fan</button><br><br>";
   html += "<a href='/config'>Go to Config</a>";
+  html += "<p>Temperature: <span id='temperature'>--</span>%</p>";
+  html += "<script>";
+  html += "setInterval(() => {";
+  html += "fetch('/status').then(r => r.json()).then(d => {";
+  html += "document.getElementById('temperature').innerText = d.temperature;";
+  html += "});";
+  html += "}, 3000);"; // Update every 3 seconds
+  html += "</script>";
   html += "</body></html>";
   server.send(200, "text/html", html);
 }
@@ -58,6 +66,16 @@ void handleToggle() {
 
   server.sendHeader("Location", "/");
   server.send(303);
+}
+
+void handleStatus() {
+  float h = dht.readTemperature();
+  if (isnan(h)) {
+    server.send(500, "application/json", "{\"error\":\"DHT read failed\"}");
+    return;
+  }
+  String json = "{ \"temperature\": " + String(h, 1) + " }";
+  server.send(200, "application/json", json);
 }
 
 void handleConfig() {
@@ -117,6 +135,16 @@ void setup() {
 void loop() {
   server.handleClient();
 
+  unsigned long currentMillis = millis();
+  if (!manualMode && currentMillis - previousMillis >= interval) {
+    previousMillis = currentMillis;
+
+    float temperature = dht.readTemperature();
+    if (isnan(temperature)) {
+      Serial.println("Failed to read from DHT sensor!");
+      return;
+    }
+
   if (!manualMode) {
     float temp = dht.readTemperature();
     if (isnan(temp)) {
@@ -138,6 +166,5 @@ void loop() {
   } else {
     Serial.println("Manual Mode Active — Automation Paused");
   }
-
-  delay(3000);
+ }
 }
