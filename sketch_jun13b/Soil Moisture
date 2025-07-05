@@ -44,6 +44,14 @@ void handleRoot() {
   html += "<button onclick=\"location.href='/toggle?relay=1'\">Toggle Relay 1</button><br>";
   html += "<button onclick=\"location.href='/toggle?relay=2'\">Toggle Relay 2</button><br><br>";
   html += "<a href='/config'>Go to Config</a>";
+  html += "<p>Soil Moisture Content: <span id='humidity'>--</span>%</p>";
+  html += "<script>";
+  html += "setInterval(() => {";
+  html += "fetch('/status').then(r => r.json()).then(d => {";
+  html += "document.getElementById('humidity').innerText = d.humidity;";
+  html += "});";
+  html += "}, 3000);"; // Update every 3 seconds
+  html += "</script>";
   html += "</body></html>";
   server.send(200, "text/html", html);
 }
@@ -81,14 +89,24 @@ void handleConfig() {
   server.send(200, "text/html", html);
 }
 
-void handleSetThreshold() {
+void handleConfig() {
   if (!server.authenticate(http_username, http_password)) return server.requestAuthentication();
   if (server.hasArg("value")) moistureThreshold = server.arg("value").toInt();
   server.sendHeader("Location", "/config");
   server.send(303);
 }
 
-void handleSetMode() {
+void handleStatus() {
+  float h = moisture();
+  if (isnan(h)) {
+    server.send(500, "application/json", "{\"error\":\"Sensor read failed\"}");
+    return;
+  }
+  String json = "{ \"soil moisture\": " + String(h, 1) + " }";
+  server.send(200, "application/json", json);
+}
+
+void handleToggle() {
   if (!server.authenticate(http_username, http_password)) return server.requestAuthentication();
 
   if (server.hasArg("mode")) {
@@ -113,6 +131,7 @@ void setup() {
   server.on("/config", handleConfig);
   server.on("/setThreshold", handleSetThreshold);
   server.on("/setMode", handleSetMode);
+  server.on("/status", handleStatus);
 
   server.begin();
   Serial.println("Web server started.");
@@ -120,6 +139,16 @@ void setup() {
 
 void loop() {
   server.handleClient();
+
+  unsigned long currentMillis = millis();
+  if (!manualMode && currentMillis - previousMillis >= interval) {
+    previousMillis = currentMillis;
+
+    float humidity = dht.readHumidity();
+    if (isnan(humidity)) {
+      Serial.println("Failed to read from DHT sensor!");
+      return;
+    }
 
   if (!manualMode) {
     int moisture = analogRead(SOIL_PIN);
@@ -138,6 +167,5 @@ void loop() {
   } else {
     Serial.println("Manual Mode Active — Automation Paused");
   }
-
-  delay(2000);
+ }
 }
