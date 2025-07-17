@@ -2,30 +2,52 @@
 #include <WebServer.h>
 #include <DHT.h>
 
+// === Function Declarations (fix compiler whine) ===
+void handleRoot();
+void handleToggle();
+void handleConfig();
+void handleSetThreshold();
+void handleSetMode();
+
+
 // ======= WiFi Credentials =======
 const char *ssid = "ESP_HUM";
 const char *password = "123456789";
 const char* http_username = "admin";
 const char* http_password = "admin123";
 
-// ======= Pins =======
-const int RELAY1_PIN = 5;         // Fan relay
-const int DHT_PIN = 14;           // DHT22 data pin
+// ======= Pin Assignments =======
+const int HUMIDIFIER_RELAY_PIN = 4;
+const int DEHUMIDIFIER_RELAY_PIN = 5;
+const int DHT_PIN = 14;
 
 #define DHTTYPE DHT22
 DHT dht(DHT_PIN, DHTTYPE);
 
-// ======= Globals =======
-float humidityThreshold = 30.0;       // Default fan-on threshold (%)
-bool manualMode = false;          // false = Auto, true = Manual
+// ======= System State =======
+float humidityThreshold = 30.0;       // Default threshold (%)
+bool manualMode = false;
+
 WebServer server(80);
 
-// ======= Helper Functions =======
+// ======= Setup Functions =======
 void setupRelays() {
-  pinMode(RELAY1_PIN, OUTPUT);
-  digitalWrite(RELAY1_PIN, HIGH); // OFF by default (assuming LOW = ON)
+  pinMode(HUMIDIFIER_RELAY_PIN, OUTPUT);
+  pinMode(DEHUMIDIFIER_RELAY_PIN, OUTPUT);
+
+  digitalWrite(HUMIDIFIER_RELAY_PIN, HIGH);     // OFF by default
+  digitalWrite(DEHUMIDIFIER_RELAY_PIN, HIGH);   // OFF by default
 }
 
+void setupWebRoutes() {
+  server.on("/", handleRoot);
+  server.on("/toggle", handleToggle);
+  server.on("/config", handleConfig);
+  server.on("/setThreshold", handleSetThreshold);
+  server.on("/setMode", handleSetMode);
+}
+
+// ======= Web Handlers =======
 void handleRoot() {
   if (!server.authenticate(http_username, http_password)) return server.requestAuthentication();
 
@@ -34,10 +56,13 @@ void handleRoot() {
 
   String html = "<!DOCTYPE html><html><head><title>Humidity Control</title><meta name='viewport' content='width=device-width, initial-scale=1'>";
   html += "<style>body{font-family:sans-serif;text-align:center;background:#eef;}button,input{padding:15px 30px;margin:10px;font-size:20px;}</style></head><body>";
-  html += "<h2>ESP32 Fan Control</h2>";
+  html += "<h2>ESP32 Humidity Control</h2>";
   html += "<p><b>Mode:</b> " + modeStr + "</p>";
   html += "<form action='/setMode'><input type='hidden' name='mode' value='" + otherModeStr + "'><input type='submit' value='Switch to " + otherModeStr + "'></form><br>";
-  html += "<button onclick=\"location.href='/toggle?relay=1'\">Toggle Fan</button><br><br>";
+
+  html += "<button onclick=\"location.href='/toggle?relay=1'\">Toggle Dehumidifier</button><br>";
+  html += "<button onclick=\"location.href='/toggle?relay=2'\">Toggle Humidifier</button><br><br>";
+
   html += "<a href='/config'>Go to Config</a>";
   html += "</body></html>";
   server.send(200, "text/html", html);
@@ -54,7 +79,8 @@ void handleToggle() {
   manualMode = true;
 
   int relay = server.arg("relay").toInt();
-  if (relay == 1) digitalWrite(RELAY1_PIN, !digitalRead(RELAY1_PIN));
+  if (relay == 1) digitalWrite(DEHUMIDIFIER_RELAY_PIN, !digitalRead(DEHUMIDIFIER_RELAY_PIN));
+  else if (relay == 2) digitalWrite(HUMIDIFIER_RELAY_PIN, !digitalRead(HUMIDIFIER_RELAY_PIN));
 
   server.sendHeader("Location", "/");
   server.send(303);
@@ -74,7 +100,6 @@ void handleConfig() {
   server.send(200, "text/html", html);
 }
 
-
 void handleSetThreshold() {
   if (!server.authenticate(http_username, http_password)) return server.requestAuthentication();
 
@@ -86,7 +111,6 @@ void handleSetThreshold() {
   server.send(303);
 }
 
-
 void handleSetMode() {
   if (!server.authenticate(http_username, http_password)) return server.requestAuthentication();
 
@@ -95,30 +119,27 @@ void handleSetMode() {
     manualMode = (mode == "manual");
     Serial.println("Mode changed to: " + mode);
   }
+
   server.sendHeader("Location", "/");
   server.send(303);
 }
 
-// ======= Setup & Loop =======
+// ======= Main Setup =======
 void setup() {
   Serial.begin(115200);
   dht.begin();
 
   WiFi.softAP(ssid, password);
-  Serial.println("WiFi AP started. Connect to: ESP_HUMIDITY");
+  Serial.println("WiFi AP started. Connect to: ESP_HUM");
 
   setupRelays();
-
-  server.on("/", handleRoot);
-  server.on("/toggle", handleToggle);
-  server.on("/config", handleConfig);
-  server.on("/setThreshold", handleSetThreshold);
-  server.on("/setMode", handleSetMode);
+  setupWebRoutes();
 
   server.begin();
   Serial.println("Web server started.");
 }
 
+// ======= Main Loop =======
 void loop() {
   server.handleClient();
 
@@ -133,12 +154,18 @@ void loop() {
     Serial.print(humidity);
     Serial.println(" %");
 
-    if (humidity > humidityThreshold) {
-      digitalWrite(RELAY1_PIN, HIGH); // Fan ON (if HIGH is ON)
-      Serial.println("Too Humid = Fan ON");
+    if (humidity > humidityThreshold + 2) {
+      digitalWrite(DEHUMIDIFIER_RELAY_PIN, HIGH); // ON
+      digitalWrite(HUMIDIFIER_RELAY_PIN, HIGH);   // OFF
+      Serial.println("Too Humid = Dehumidifier ON, Humidifier OFF");
+    } else if (humidity < humidityThreshold - 2) {
+      digitalWrite(DEHUMIDIFIER_RELAY_PIN, LOW);  // OFF
+      digitalWrite(HUMIDIFIER_RELAY_PIN, LOW);    // ON
+      Serial.println("Too Dry = Humidifier ON, Dehumidifier OFF");
     } else {
-      digitalWrite(RELAY1_PIN, LOW); // Fan OFF
-      Serial.println("Humidity Normal = Fan OFF");
+      digitalWrite(DEHUMIDIFIER_RELAY_PIN, LOW);  // OFF
+      digitalWrite(HUMIDIFIER_RELAY_PIN, HIGH);   // OFF
+      Serial.println("Humidity OK = Both OFF");
     }
   } else {
     Serial.println("Manual Mode Active — Automation Paused");
